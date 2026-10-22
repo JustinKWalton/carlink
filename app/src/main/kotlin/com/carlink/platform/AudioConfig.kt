@@ -64,14 +64,18 @@ data class AudioConfig(
                 navBufferCapacityMs = 200,
             )
 
-        /** Intel GM AAOS. 48kHz native, FAST denied, larger buffers for stall absorption. */
+        /** Intel GM AAOS. 48kHz native, FAST denied, larger buffers for stall absorption.
+         *  Fork (Justin's 2025 Sierra 2500, gminfo37): media audio stuttered on upstream's
+         *  4x / 80ms / 750ms. Doubled the AudioTrack buffer, nearly doubled prefill and
+         *  matched the ARM fallback's 1000ms media ring to ride out radio stalls, trading
+         *  ~100ms of extra start latency. Nav ring left at 300ms so prompts stay prompt. */
         val GM_AAOS =
             AudioConfig(
                 sampleRate = 48000,
-                bufferMultiplier = 4,
+                bufferMultiplier = 8,
                 performanceMode = AudioTrack.PERFORMANCE_MODE_NONE,
-                prefillThresholdMs = 80,
-                mediaBufferCapacityMs = 750,
+                prefillThresholdMs = 150,
+                mediaBufferCapacityMs = 1000,
                 navBufferCapacityMs = 300,
             )
 
