@@ -9,6 +9,7 @@ import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import com.carlink.logging.logWarn
 import com.carlink.platform.AudioConfig
 import com.carlink.protocol.AudioRoutingState
 import com.carlink.protocol.StreamPurpose
@@ -153,6 +154,10 @@ class DualStreamAudioManager(
     private val windowZeroFiltered = AtomicLong(0)
     private var prevNavOverflow = 0
     private var prevNavUnderruns = 0
+
+    // FORK: session totals for the [AUDIO_STUTTER] WARN line (see the 30 s stats block).
+    private var sessionUnderruns = 0L
+    private var sessionOverflows = 0L
 
     private val bufferMultiplier = audioConfig.bufferMultiplier
     private val prefillThresholdMs = audioConfig.prefillThresholdMs
@@ -1591,6 +1596,25 @@ class DualStreamAudioManager(
                         if (focusPurposes.isNotEmpty()) sb.append(" Focus:[").append(focusPurposes).append("]")
 
                         logPerf(sb.toString())
+
+                        // FORK: AUDIO_PERF above is debug-level, so the Normal and Performance
+                        // log presets dropped it and an exported log never showed stutter. Emit
+                        // one WARN line per 30 s window that had any underrun/overflow, with
+                        // session totals and the buffer in use, so a drive log answers "did it
+                        // stutter, how often, on which buffer" without a debug preset.
+                        val windowUrun = mUrun + nUrun
+                        val windowOvf = mOvf + nOvf
+                        if (windowUrun > 0 || windowOvf > 0) {
+                            sessionUnderruns += windowUrun
+                            sessionOverflows += windowOvf
+                            logWarn(
+                                "[AUDIO_STUTTER] last 30 s: media urun=$mUrun ovf=$mOvf, nav urun=$nUrun ovf=$nOvf; " +
+                                    "session urun=$sessionUnderruns ovf=$sessionOverflows; " +
+                                    "buffer ${bufferMultiplier}x prefill=${prefillThresholdMs}ms " +
+                                    "media ring=${audioConfig.mediaBufferCapacityMs}ms",
+                                tag = "AUDIO",
+                            )
+                        }
                         lastStatsTime = now
                     }
                 } catch (e: InterruptedException) {
