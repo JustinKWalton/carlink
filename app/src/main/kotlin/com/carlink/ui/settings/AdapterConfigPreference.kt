@@ -161,6 +161,31 @@ enum class MediaDelayConfig(
 }
 
 /**
+ * FORK: app-side playback buffer on GM AAOS (Intel gminfo3.7), applied to
+ * [com.carlink.platform.AudioConfig.GM_AAOS]. Unlike [MediaDelayConfig] (the adapter's own
+ * PCM buffer) this never goes on the wire: it sizes the radio's AudioTrack, the prefill
+ * before playback starts, and the media ring that rides out radio stalls. Bigger = fewer
+ * stutters, later starts (Siri, the first beat of a song). Nav prompts keep their own ring.
+ *
+ * Persisted by [bufferMultiplier]. NORMAL is upstream's tuning; LARGE is the fork default
+ * (stutter reported on a 2025 Sierra 2500 with NORMAL).
+ */
+enum class AudioBufferConfig(
+    val bufferMultiplier: Int,
+    val prefillThresholdMs: Int,
+    val mediaBufferCapacityMs: Int,
+) {
+    NORMAL(4, 80, 750),
+    LARGE(8, 150, 1000),
+    EXTRA_LARGE(12, 250, 1500),
+    ;
+
+    companion object {
+        val DEFAULT = LARGE
+    }
+}
+
+/**
  * Frame rate configuration for adapter initialization.
  * Controls the FPS value sent in the OPEN message to the adapter firmware.
  * 30 FPS is default — sufficient for CarPlay UI and reduces thermal/power load.
@@ -332,6 +357,9 @@ class AdapterConfigPreference private constructor(
         // Cluster navigation: true = show CarPlay turn-by-turn on instrument cluster
         private val KEY_CLUSTER_NAVIGATION = booleanPreferencesKey("cluster_navigation_enabled")
 
+        // FORK audio buffer: stored as AudioBufferConfig.bufferMultiplier (4, 8, 12)
+        private val KEY_AUDIO_BUFFER = intPreferencesKey("fork_audio_buffer")
+
         // Initialization tracking
         private val KEY_HAS_COMPLETED_FIRST_INIT = booleanPreferencesKey("has_completed_first_init")
         private val KEY_LAST_INIT_VERSION_CODE = longPreferencesKey("last_init_version_code")
@@ -349,6 +377,7 @@ class AdapterConfigPreference private constructor(
         private const val SYNC_CACHE_KEY_HAND_DRIVE = "hand_drive_mode"
         private const val SYNC_CACHE_KEY_GPS_FORWARDING = "gps_forwarding"
         private const val SYNC_CACHE_KEY_CLUSTER_NAVIGATION = "cluster_navigation_enabled"
+        private const val SYNC_CACHE_KEY_AUDIO_BUFFER = "fork_audio_buffer"
         private const val SYNC_CACHE_KEY_HAS_COMPLETED_FIRST_INIT = "has_completed_first_init"
         private const val SYNC_CACHE_KEY_LAST_INIT_VERSION_CODE = "last_init_version_code"
         private const val SYNC_CACHE_KEY_PENDING_CHANGES = "pending_changes"
@@ -572,6 +601,37 @@ class AdapterConfigPreference private constructor(
         }
     }
 
+    val audioBufferFlow: Flow<AudioBufferConfig> =
+        dataStore.data.map { preferences ->
+            val value = preferences[KEY_AUDIO_BUFFER] ?: AudioBufferConfig.DEFAULT.bufferMultiplier
+            AudioBufferConfig.entries.find { it.bufferMultiplier == value } ?: AudioBufferConfig.DEFAULT
+        }
+
+    /**
+     * Get current audio buffer configuration synchronously (read once per CarlinkManager).
+     */
+    fun getAudioBufferSync(): AudioBufferConfig {
+        val value = syncCache.getInt(SYNC_CACHE_KEY_AUDIO_BUFFER, AudioBufferConfig.DEFAULT.bufferMultiplier)
+        return AudioBufferConfig.entries.find { it.bufferMultiplier == value } ?: AudioBufferConfig.DEFAULT
+    }
+
+    /**
+     * Set audio buffer configuration.
+     * Local app setting — does NOT call addPendingChange() (never sent to the adapter).
+     */
+    suspend fun setAudioBuffer(config: AudioBufferConfig) {
+        try {
+            dataStore.edit { preferences ->
+                preferences[KEY_AUDIO_BUFFER] = config.bufferMultiplier
+            }
+            syncCache.edit().putInt(SYNC_CACHE_KEY_AUDIO_BUFFER, config.bufferMultiplier).apply()
+            logInfo("Audio buffer preference saved: $config", tag = "AdapterConfig")
+        } catch (e: IOException) {
+            logError("Failed to save audio buffer preference: $e", tag = "AdapterConfig")
+            throw e
+        }
+    }
+
     val videoResolutionFlow: Flow<VideoResolutionConfig> =
         dataStore.data.map { preferences ->
             val value = preferences[KEY_VIDEO_RESOLUTION]
@@ -741,8 +801,9 @@ class AdapterConfigPreference private constructor(
      * BuildConfig.DEBUG && isAaosEmulator()): on a DEBUG APK running on the
      * AAOS emulator, Cluster Integration defaults ON so the Templates Host binding is exercised
      * without re-toggling it after every reinstall (a fresh install wipes the persisted
-     * component-enable state). Production APKs and all real hardware default OFF — cluster
-     * integration there stays an explicit user opt-in.
+     * component-enable state). Production APKs default OFF everywhere EXCEPT gminfo3.7 (FORK
+     * change): that radio is this app's target, and turn-by-turn on the cluster and HUD is the
+     * point, so a fresh install there starts with Cluster Navigation ON.
      *
      * An explicit user choice in EITHER direction is always honored over this default, because
      * the DataStore key / sync-cache key is only present once a setter has run (no init-time
@@ -750,7 +811,8 @@ class AdapterConfigPreference private constructor(
      * per-NaviJSON on the USB read thread) and platform/build-type never change at runtime.
      */
     private val clusterNavigationDefault: Boolean by lazy {
-        BuildConfig.DEBUG && PlatformDetector.detect(appContext).isAaosEmulator()
+        val platform = PlatformDetector.detect(appContext)
+        (BuildConfig.DEBUG && platform.isAaosEmulator()) || platform.isGmInfo37()
     }
 
     val clusterNavigationFlow: Flow<Boolean> =
@@ -899,6 +961,7 @@ class AdapterConfigPreference private constructor(
                 preferences.remove(KEY_HAND_DRIVE)
                 preferences.remove(KEY_GPS_FORWARDING)
                 preferences.remove(KEY_CLUSTER_NAVIGATION)
+                preferences.remove(KEY_AUDIO_BUFFER)
                 preferences.remove(KEY_HAS_COMPLETED_FIRST_INIT)
                 preferences.remove(KEY_LAST_INIT_VERSION_CODE)
                 preferences.remove(KEY_PENDING_CHANGES)
@@ -917,6 +980,7 @@ class AdapterConfigPreference private constructor(
                     remove(SYNC_CACHE_KEY_HAND_DRIVE)
                     remove(SYNC_CACHE_KEY_GPS_FORWARDING)
                     remove(SYNC_CACHE_KEY_CLUSTER_NAVIGATION)
+                    remove(SYNC_CACHE_KEY_AUDIO_BUFFER)
                     remove(SYNC_CACHE_KEY_HAS_COMPLETED_FIRST_INIT)
                     remove(SYNC_CACHE_KEY_LAST_INIT_VERSION_CODE)
                     remove(SYNC_CACHE_KEY_PENDING_CHANGES)

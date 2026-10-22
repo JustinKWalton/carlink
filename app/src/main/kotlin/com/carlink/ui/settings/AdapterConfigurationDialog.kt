@@ -131,6 +131,9 @@ fun AdapterConfigurationDialog(
     val savedMediaDelay by adapterConfigPreference.mediaDelayFlow.collectAsStateWithLifecycle(
         initialValue = MediaDelayConfig.DEFAULT,
     )
+    val savedAudioBuffer by adapterConfigPreference.audioBufferFlow.collectAsStateWithLifecycle(
+        initialValue = AudioBufferConfig.DEFAULT,
+    )
     val savedVideoResolution by adapterConfigPreference.videoResolutionFlow.collectAsStateWithLifecycle(
         initialValue = VideoResolutionConfig.AUTO,
     )
@@ -216,6 +219,7 @@ fun AdapterConfigurationDialog(
     var selectedMicSource by remember { mutableStateOf(savedMicSource) }
     var selectedWifiBand by remember { mutableStateOf(savedWifiBand) }
     var selectedMediaDelay by remember { mutableStateOf(savedMediaDelay) }
+    var selectedAudioBuffer by remember { mutableStateOf(savedAudioBuffer) }
     var selectedVideoResolution by remember { mutableStateOf(savedVideoResolution) }
     var selectedFps by remember { mutableStateOf(savedFps) }
     var selectedHandDrive by remember { mutableStateOf(savedHandDrive) }
@@ -232,6 +236,7 @@ fun AdapterConfigurationDialog(
     LaunchedEffect(savedMicSource) { selectedMicSource = savedMicSource }
     LaunchedEffect(savedWifiBand) { selectedWifiBand = savedWifiBand }
     LaunchedEffect(savedMediaDelay) { selectedMediaDelay = savedMediaDelay }
+    LaunchedEffect(savedAudioBuffer) { selectedAudioBuffer = savedAudioBuffer }
     LaunchedEffect(savedVideoResolution) { selectedVideoResolution = savedVideoResolution }
     LaunchedEffect(savedFps) { selectedFps = savedFps }
     LaunchedEffect(savedHandDrive) { selectedHandDrive = savedHandDrive }
@@ -248,6 +253,7 @@ fun AdapterConfigurationDialog(
             selectedMicSource != savedMicSource ||
             selectedWifiBand != savedWifiBand ||
             selectedMediaDelay != savedMediaDelay ||
+            selectedAudioBuffer != savedAudioBuffer ||
             selectedVideoResolution != savedVideoResolution ||
             selectedFps != savedFps ||
             selectedHandDrive != savedHandDrive ||
@@ -474,6 +480,51 @@ fun AdapterConfigurationDialog(
                                             MediaDelayConfig.MEDIUM -> "500ms — Balanced latency and stability"
                                             MediaDelayConfig.STANDARD -> "1000ms — Firmware default (recommended)"
                                             MediaDelayConfig.HIGH -> "2000ms — Maximum buffer for problematic setups"
+                                        },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colorScheme.primary,
+                                )
+                            }
+
+                            // FORK: app-side playback buffer on this radio (never sent to the box)
+                            ConfigurationOptionCard(
+                                title = "Audio Buffer",
+                                description = "Playback buffer on this radio",
+                                icon = Icons.Default.Timer,
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    AudioSourceButton(
+                                        label = "Normal",
+                                        icon = Icons.Default.Timer,
+                                        isSelected = selectedAudioBuffer == AudioBufferConfig.NORMAL,
+                                        onClick = { selectedAudioBuffer = AudioBufferConfig.NORMAL },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AudioSourceButton(
+                                        label = "Large",
+                                        icon = Icons.Default.Timer,
+                                        isSelected = selectedAudioBuffer == AudioBufferConfig.LARGE,
+                                        onClick = { selectedAudioBuffer = AudioBufferConfig.LARGE },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AudioSourceButton(
+                                        label = "Extra large",
+                                        icon = Icons.Default.Timer,
+                                        isSelected = selectedAudioBuffer == AudioBufferConfig.EXTRA_LARGE,
+                                        onClick = { selectedAudioBuffer = AudioBufferConfig.EXTRA_LARGE },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text =
+                                        when (selectedAudioBuffer) {
+                                            AudioBufferConfig.NORMAL -> "Upstream tuning — quickest start, may stutter on this radio"
+                                            AudioBufferConfig.LARGE -> "Fewer stutters, ~0.1 s later start (recommended)"
+                                            AudioBufferConfig.EXTRA_LARGE -> "Most stall-proof, ~0.2 s later start; use if Large still stutters"
                                         },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = colorScheme.primary,
@@ -909,6 +960,7 @@ fun AdapterConfigurationDialog(
                                     ", wifi=$selectedWifiBand" +
                                     ", callQuality=1(hardcoded)" +
                                     ", mediaDelay=$selectedMediaDelay" +
+                                    ", audioBuffer=$selectedAudioBuffer" +
                                     ", resolution=${selectedVideoResolution.toStorageString()}" +
                                     ", fps=${selectedFps.fps}" +
                                     ", handDrive=$selectedHandDrive" +
@@ -926,6 +978,7 @@ fun AdapterConfigurationDialog(
                                 adapterConfigPreference.setMicSource(selectedMicSource)
                                 adapterConfigPreference.setWifiBand(selectedWifiBand)
                                 adapterConfigPreference.setMediaDelay(selectedMediaDelay)
+                                adapterConfigPreference.setAudioBuffer(selectedAudioBuffer)
                                 adapterConfigPreference.setVideoResolution(selectedVideoResolution)
                                 adapterConfigPreference.setFps(selectedFps)
                                 adapterConfigPreference.setHandDrive(selectedHandDrive)

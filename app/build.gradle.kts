@@ -196,6 +196,25 @@ androidComponents {
     }
 }
 
+// FORK (JustinKWalton/carlink): fork releases need their own versionCodes, because Play
+// rejects a code it has already seen and upstream's next release reuses the next integer.
+// versionCode = upstream code * 100 + FORK_REVISION, so upstream 161 + fork rev 1 = 16101,
+// and upstream 162 (16200) still sorts above every 161-based fork build. Reset
+// FORK_REVISION to 1 after merging a new upstream release; bump it for fork-only changes.
+// Kept down here, away from upstream's appVersionCode line, so upstream merges don't conflict.
+val forkRevision = 1
+androidComponents {
+    onVariants { variant ->
+        val upstreamCode = android.defaultConfig.versionCode ?: 0
+        variant.outputs.forEach { output ->
+            output.versionCode.set(upstreamCode * 100 + forkRevision)
+            output.versionName.set(
+                "%d.%02d-j%d".format(upstreamCode / 100, upstreamCode % 100, forkRevision),
+            )
+        }
+    }
+}
+
 // Kotlin compiler: report deprecations and unchecked casts as warnings
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {

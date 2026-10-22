@@ -773,11 +773,14 @@ class CarlinkManager(
         // Detect platform for optimal audio configuration
         // Pass user-configured sample rate from AdapterConfig (overrides platform default)
         val platformInfo = PlatformDetector.detect(context)
-        val audioConfig = AudioConfig.forPlatform(platformInfo, userSampleRate = config.sampleRate)
+        val audioBuffer = AdapterConfigPreference.getInstance(context).getAudioBufferSync()
+        val audioConfig =
+            AudioConfig.forPlatform(platformInfo, userSampleRate = config.sampleRate, gmBuffer = audioBuffer)
 
         logInfo(
             "[PLATFORM] Using AudioConfig: sampleRate=${audioConfig.sampleRate}Hz, " +
-                "bufferMult=${audioConfig.bufferMultiplier}x, prefill=${audioConfig.prefillThresholdMs}ms",
+                "bufferMult=${audioConfig.bufferMultiplier}x, prefill=${audioConfig.prefillThresholdMs}ms, " +
+                "mediaRing=${audioConfig.mediaBufferCapacityMs}ms (Audio Buffer setting: $audioBuffer)",
             tag = Logger.Tags.AUDIO,
         )
         logInfo(

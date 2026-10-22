@@ -1,6 +1,7 @@
 package com.carlink.platform
 
 import android.media.AudioTrack
+import com.carlink.ui.settings.AudioBufferConfig
 
 /**
  * AudioConfig - Configuration for audio playback behavior.
@@ -65,17 +66,16 @@ data class AudioConfig(
             )
 
         /** Intel GM AAOS. 48kHz native, FAST denied, larger buffers for stall absorption.
-         *  Fork (Justin's 2025 Sierra 2500, gminfo37): media audio stuttered on upstream's
-         *  4x / 80ms / 750ms. Doubled the AudioTrack buffer, nearly doubled prefill and
-         *  matched the ARM fallback's 1000ms media ring to ride out radio stalls, trading
-         *  ~100ms of extra start latency. Nav ring left at 300ms so prompts stay prompt. */
+         *  These are upstream's values (= AudioBufferConfig.NORMAL). FORK: forPlatform
+         *  overlays the user's Audio Buffer choice (default LARGE: 8x / 150ms / 1000ms),
+         *  because media stuttered on a 2025 Sierra 2500 at these. Nav ring stays 300ms. */
         val GM_AAOS =
             AudioConfig(
                 sampleRate = 48000,
-                bufferMultiplier = 8,
+                bufferMultiplier = 4,
                 performanceMode = AudioTrack.PERFORMANCE_MODE_NONE,
-                prefillThresholdMs = 150,
-                mediaBufferCapacityMs = 1000,
+                prefillThresholdMs = 80,
+                mediaBufferCapacityMs = 750,
                 navBufferCapacityMs = 300,
             )
 
@@ -86,6 +86,7 @@ data class AudioConfig(
         fun forPlatform(
             platformInfo: PlatformDetector.PlatformInfo,
             userSampleRate: Int? = null,
+            gmBuffer: AudioBufferConfig = AudioBufferConfig.DEFAULT,
         ): AudioConfig {
             val effectiveSampleRate = userSampleRate ?: platformInfo.nativeSampleRate
 
@@ -94,7 +95,12 @@ data class AudioConfig(
                 // overridable via userSampleRate for field testing — intentional,
                 // even though non-48kHz defeats the "avoid resampling" rationale.
                 platformInfo.requiresGmAaosAudioFixes() -> {
-                    GM_AAOS.copy(sampleRate = effectiveSampleRate)
+                    GM_AAOS.copy(
+                        sampleRate = effectiveSampleRate,
+                        bufferMultiplier = gmBuffer.bufferMultiplier,
+                        prefillThresholdMs = gmBuffer.prefillThresholdMs,
+                        mediaBufferCapacityMs = gmBuffer.mediaBufferCapacityMs,
+                    )
                 }
 
                 // Intel, non-GM: emulator path. GM audio fixes don't apply (no FAST
