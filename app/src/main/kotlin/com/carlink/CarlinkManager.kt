@@ -186,8 +186,18 @@ class CarlinkManager(
         private const val USB_WAIT_PERIOD_MS = 3000L
         private const val PAIR_TIMEOUT_MS = 15000L
 
+        // FORK: while the box reports SCANNING_DEVICE and no phone has connected, re-send
+        // WIFI_CONNECT (StartAutoConnect) every 20 s, up to 15 times (~5 min). Upstream sends it
+        // once per start(), so a phone that wasn't reachable at that moment (Bluetooth still
+        // waking, phone grabbed by the truck's own CarPlay first) was never asked again.
+        private const val PHONE_NUDGE_INTERVAL_MS = 20_000L
+        private const val PHONE_NUDGE_MAX = 15
+
         // Auto-reconnect constants
-        private const val MAX_RECONNECT_ATTEMPTS = 5
+        // FORK: 5 -> 20. With the 30 s cap that is ~9 min of retries (plus findDevice's own
+        // ~30 s wait per attempt), so a box that powers up late after ignition, or a radio that
+        // resumes before the box, still gets connected without anyone touching the screen.
+        private const val MAX_RECONNECT_ATTEMPTS = 20
         private const val INITIAL_RECONNECT_DELAY_MS = 2000L // Start with 2 seconds
         private const val MAX_RECONNECT_DELAY_MS = 30000L // Cap at 30 seconds
 
@@ -507,6 +517,7 @@ class CarlinkManager(
 
     // Auto-reconnect on USB disconnect
     private var reconnectJob: Job? = null
+    private var phoneNudgeJob: Job? = null
     private var reconnectAttempts: Int = 0
 
     // Status escalation: detect degraded adapter states and give actionable user feedback.
@@ -1009,6 +1020,10 @@ class CarlinkManager(
             logError("Failed to find Carlinkit device", tag = Logger.Tags.USB)
             setState(State.DISCONNECTED)
             setStatusText("Box not found")
+            // FORK: keep looking. Upstream stopped here for good, so a box that enumerated
+            // after findDevice's ~30 s window (slow power-up after ignition) needed a manual
+            // Reset Box. scheduleReconnect's backoff and attempt cap bound this.
+            scheduleReconnect()
             return
         }
 
@@ -2189,6 +2204,7 @@ class CarlinkManager(
                         setStatusText("Scanning for phone...")
                     }
                     logDebug("[CMD] SCANNING_DEVICE", tag = Logger.Tags.ADAPTR)
+                    startPhoneNudge()
                 } else if (message.command == CommandMapping.BT_CONNECTED ||
                     message.command == CommandMapping.DEVICE_FOUND
                 ) {
@@ -3188,7 +3204,7 @@ class CarlinkManager(
      * - Attempt 2: 4 seconds delay
      * - Attempt 3: 8 seconds delay
      * - Attempt 4: 16 seconds delay
-     * - Attempt 5: 30 seconds delay (capped)
+     * - Attempt 5 and later: 30 seconds delay (capped)
      *
      * Gives up after MAX_RECONNECT_ATTEMPTS to prevent infinite loops.
      */
@@ -3258,6 +3274,27 @@ class CarlinkManager(
                 } else {
                     logInfo("[RECONNECT] Already connected, cancelling reconnect", tag = Logger.Tags.USB)
                     reconnectAttempts = 0
+                }
+            }
+    }
+
+    /**
+     * FORK: re-ask the box to auto-connect while it is scanning and no phone has connected.
+     * Idempotent while a nudge loop is running; the loop ends as soon as the session leaves
+     * CONNECTING (phone connected -> DEVICE_CONNECTED, or any teardown -> DISCONNECTED).
+     */
+    private fun startPhoneNudge() {
+        if (phoneNudgeJob?.isActive == true || released) return
+        phoneNudgeJob =
+            scope.launch {
+                repeat(PHONE_NUDGE_MAX) { attempt ->
+                    delay(PHONE_NUDGE_INTERVAL_MS)
+                    if (state != State.CONNECTING) return@launch
+                    logInfo(
+                        "[AUTOCONNECT] Box still scanning — re-sending WIFI_CONNECT (${attempt + 1}/$PHONE_NUDGE_MAX)",
+                        tag = Logger.Tags.ADAPTR,
+                    )
+                    adapterDriver?.sendCommand(CommandMapping.WIFI_CONNECT)
                 }
             }
     }

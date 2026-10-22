@@ -50,6 +50,12 @@ data class NavigationState(
     val nextJunctionType: Int? = null,
     val nextRoundaboutExit: Int? = null,
     val nextExitAngle: Int? = null,
+    // FORK: from the iAP2 route plan (CarPlay only; null on other paths).
+    // nextDistance = route-plan segment meters from the current maneuver to the next one (0x0005 of the
+    // next step), so the cluster's "then" step shows its own distance instead of the trip total.
+    // roadAfter = road you are on after the current maneuver (0x0004), for Step.setRoad.
+    val nextDistance: Int? = null,
+    val roadAfter: String? = null,
 ) {
     val isActive: Boolean get() = status == 1
     val isIdle: Boolean get() = status == 0
@@ -394,6 +400,7 @@ object NavigationStateManager {
                     nextRoundaboutExit = (payload["NaviRoundaboutExit"] as? Number)?.toInt(),
                     // AA roundabout exit angle for the previewed next maneuver (NaviTurnAngle).
                     nextExitAngle = (payload["NaviTurnAngle"] as? Number)?.toInt(),
+                    nextDistance = null,
                 )
 
             logInfo(
@@ -475,6 +482,8 @@ object NavigationStateManager {
                 nextJunctionType = null,
                 nextRoundaboutExit = null,
                 nextExitAngle = nextStep?.exitAngle,
+                nextDistance = nextStep?.distanceMeters?.takeIf { it > 0 },
+                roadAfter = routeStep.postManeuverRoadName.takeIf { it.isNotEmpty() },
             )
             logNavi {
                 "[NAVI] V6_FIRED cursor=$localCursor/${routeV6.maneuvers.size}, maneuver=${mergedV6.maneuverType}, " +
@@ -607,6 +616,8 @@ object NavigationStateManager {
                     nextJunctionType = null,
                     nextRoundaboutExit = null,
                     nextExitAngle = nextStep?.exitAngle,
+                    nextDistance = nextStep?.distanceMeters?.takeIf { it > 0 },
+                    roadAfter = routeStep.postManeuverRoadName.takeIf { it.isNotEmpty() },
                 )
                 logNavi {
                     "[NAVI] Tier C state: cursor=$localCursor, maneuver=${mergedTierC.maneuverType}, road=${mergedTierC.roadName}, " +
@@ -650,6 +661,8 @@ object NavigationStateManager {
                 nextJunctionType = if (isManeuverMessage) null else current.nextJunctionType,
                 nextRoundaboutExit = if (isManeuverMessage) null else current.nextRoundaboutExit,
                 nextExitAngle = if (isManeuverMessage) null else current.nextExitAngle,
+                nextDistance = if (isManeuverMessage) null else current.nextDistance,
+                roadAfter = if (isManeuverMessage) null else current.roadAfter,
             )
 
         if (isManeuverMessage && current.hasNextStep) {

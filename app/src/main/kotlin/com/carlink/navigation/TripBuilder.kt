@@ -45,6 +45,8 @@ object TripBuilder {
         val stepBuilder = Step.Builder()
         stepBuilder.setManeuver(maneuver)
         state.roadName?.let { stepBuilder.setCue(it) }
+        // FORK: the road after the turn, for hosts that show it apart from the cue.
+        state.roadAfter?.let { stepBuilder.setRoad(it) }
 
         val stepEstimate =
             TravelEstimate
@@ -68,13 +70,17 @@ object TripBuilder {
             nextStepBuilder.setManeuver(nextManeuver)
             state.nextRoadName?.let { nextStepBuilder.setCue(it) }
 
-            // No meaningful distance to the next-next maneuver — use destination estimate
-            // as a placeholder. The cluster primarily shows the current step's distance;
-            // the next step is a preview (icon + road name).
+            // FORK: a Trip step's estimate is the distance to REACH that step, so the next step
+            // is (meters left to the current maneuver) + (the route plan's segment from the
+            // current maneuver to the next one). Upstream used the destination distance as a
+            // placeholder, which put the whole trip's mileage on the "then" step; that
+            // placeholder is kept only when the route plan has no segment distance.
+            val nextStepMeters =
+                state.nextDistance?.let { state.remainDistance + it } ?: state.distanceToDestination
             val nextStepEstimate =
                 TravelEstimate
                     .Builder(
-                        DistanceFormatter.toDistance(state.distanceToDestination),
+                        DistanceFormatter.toDistance(nextStepMeters),
                         eta,
                     ).build()
 

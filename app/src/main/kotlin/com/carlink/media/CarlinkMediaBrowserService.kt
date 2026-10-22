@@ -347,7 +347,16 @@ class CarlinkMediaBrowserService : MediaLibraryService() {
             val intent = Intent(context, CarlinkMediaBrowserService::class.java).apply {
                 action = ACTION_START_FOREGROUND
             }
-            context.startForegroundService(intent)
+            // FORK: startForegroundService from the background throws on API 31+
+            // (ForegroundServiceStartNotAllowedException, an IllegalStateException). This runs
+            // inside setState(CONNECTING) on auto-start paths (USB attach, reconnect, boot), where
+            // an uncaught throw killed the session start. The session works without the FGS; it
+            // only loses LMK protection until the next foreground start succeeds.
+            try {
+                context.startForegroundService(intent)
+            } catch (e: IllegalStateException) {
+                Log.w("CarlinkMBS", "[FGS] startForegroundService refused (background start): ${e.message}")
+            }
         }
 
         /**
